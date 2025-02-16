@@ -1,6 +1,4 @@
-import express from 'express';
-import http from 'http';
-import socketIo, { Server, Socket } from 'socket.io';
+import { Server, Socket } from 'socket.io';
 import { Pool } from 'pg';
 import dotenv from 'dotenv';
 import User from './User';
@@ -8,14 +6,15 @@ import Round from './Round';
 
 dotenv.config();
 
+// Set up the PostgreSQL connection pool
 const pool = new Pool({
     connectionString: process.env.DATABASE_URL,
 });
 
-const app = express();
-const server = http.createServer(app);
-const io: Server = new Server(server);
+// Initialize a Socket.IO server
+const server = new Server(8080);
 
+// Interface for the game table state
 interface Table {
     users: User[];
     round: Round | null;
@@ -34,6 +33,7 @@ const table: Table = {
     roundInPlay: false,
 };
 
+// Function to attempt to start a new round of the game
 const attemptToStartARound = () => {
     let qualifiedUsers: User[] = [];
 
@@ -45,19 +45,21 @@ const attemptToStartARound = () => {
 
     if (qualifiedUsers.length >= 2) {
         table.roundInPlay = true;
-        table.round = new Round(qualifiedUsers, table.smallBlind, table.bigBlind, io, () => {
+        table.round = new Round(qualifiedUsers, table.smallBlind, table.bigBlind, server, () => {
             table.users[table.users.length];
         });
     }
 };
 
-io.on('connection', async (socket: Socket) => {
+// Handle incoming connections
+server.on('connection', async (socket: Socket) => {
     const token: string = socket.handshake.auth.token;
     console.log('User connecting with token:', token);
 
     const client = await pool.connect();
 
     try {
+        // Check if the user exists in the database
         const response = await client.query(
             'SELECT * FROM userdata WHERE token = $1',
             [token]
@@ -77,58 +79,44 @@ io.on('connection', async (socket: Socket) => {
 
             const playerId = response.rows[0].id;
 
+            // Handle player actions (fold, check, raise, call)
             socket.on('fold', () => {
                 const round = table.round as Round;
-                if (round) {
-                    if (round.players[round.actionIndex].databaseId === playerId) {
-                        round.fold();
-                    } else {
-                        console.log('Round found, but it is not your turn');
-                    }
+                if (round && round.players[round.actionIndex].databaseId === playerId) {
+                    round.fold();
                 } else {
-                    console.log('No active round in session');
+                    console.log('Round found, but it is not your turn');
                 }
             });
 
             socket.on('check', () => {
                 const round = table.round as Round;
-                if (round) {
-                    if (round.players[round.actionIndex].databaseId === playerId) {
-                        round.check();
-                    } else {
-                        console.log('Round found, but it is not your turn');
-                    }
+                if (round && round.players[round.actionIndex].databaseId === playerId) {
+                    round.check();
                 } else {
-                    console.log('No active round in session');
+                    console.log('Round found, but it is not your turn');
                 }
             });
 
             socket.on('raise', ({ raiseAmount }: { raiseAmount: number }) => {
                 const round = table.round as Round;
-                if (round) {
-                    if (round.players[round.actionIndex].databaseId === playerId) {
-                        round.raise(raiseAmount);
-                    } else {
-                        console.log('Round found, but it is not your turn');
-                    }
+                if (round && round.players[round.actionIndex].databaseId === playerId) {
+                    round.raise(raiseAmount);
                 } else {
-                    console.log('No active round in session');
+                    console.log('Round found, but it is not your turn');
                 }
             });
 
             socket.on('call', () => {
                 const round = table.round as Round;
-                if (round) {
-                    if (round.players[round.actionIndex].databaseId === playerId) {
-                        round.call();
-                    } else {
-                        console.log('Round found, but it is not your turn');
-                    }
+                if (round && round.players[round.actionIndex].databaseId === playerId) {
+                    round.call();
                 } else {
-                    console.log('No active round in session');
+                    console.log('Round found, but it is not your turn');
                 }
             });
 
+            // Handle balance check
             socket.on('balCheck', () => {
                 const user = table.users.find(user => user.databaseId === playerId);
                 if (user) {
@@ -138,6 +126,7 @@ io.on('connection', async (socket: Socket) => {
                 }
             });
 
+            // Handle disconnection
             socket.on('disconnect', () => {
                 console.log('User disconnected');
 
@@ -163,8 +152,4 @@ io.on('connection', async (socket: Socket) => {
     } finally {
         client.release();
     }
-});
-
-server.listen(3000, () => {
-    console.log('Server is running on port 3000');
 });

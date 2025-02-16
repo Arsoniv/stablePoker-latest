@@ -1,28 +1,14 @@
 {
-  "name": "stablePoker",
+  "name": "${PROJECT_NAME}",
   "version": "1.0.0",
   "description": "",
   "main": "dist/index.js",
-  "type": "module",
   "scripts": {
     "build": "tsc"
   },
-  "dependencies": {
-    "dotenv": "^16.4.7",
-    "express": "^4.21.2",
-    "pg": "^8.13.3",
-    "poker-calculator": "^0.0.3",
-    "socket.io": "^4.8.1",
-    "socket.io-client": "^4.8.1",
-    "socketio": "^1.0.0",
-    "ws": "^8.18.0"
-  },
+  "dependencies": {},
   "devDependencies": {
-    "@types/express": "^5.0.0",
-    "@types/node": "^22.13.4",
-    "@types/pg": "^8.11.11",
-    "@types/socket.io": "^3.0.1",
-    "@types/socket.io-client": "^1.4.36",
     "typescript": "^5.5.3"
-  }
+  },
+  "private": true
 }
