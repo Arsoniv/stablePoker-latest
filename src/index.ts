@@ -1,10 +1,10 @@
-const express = require('express');
-const http = require('http');
-const socketIo = require('socket.io');
-const { Pool } = require('pg');
-const dotenv = require('dotenv');
-const {User} = require('./User')
-const Round = require("./Round");
+import express from 'express';
+import http from 'http';
+import socketIo, { Server, Socket } from 'socket.io';
+import { Pool } from 'pg';
+import dotenv from 'dotenv';
+import User from './User';
+import Round from './Round';
 
 dotenv.config();
 
@@ -14,39 +14,46 @@ const pool = new Pool({
 
 const app = express();
 const server = http.createServer(app);
-const io = socketIo(server);
+const io: Server = new Server(server);
 
+interface Table {
+    users: User[];
+    round: Round | null;
+    maxPlayers: number;
+    smallBlind: number;
+    bigBlind: number;
+    roundInPlay: boolean;
+}
 
-const table = {
+const table: Table = {
     users: [],
-    round: {},
+    round: null,
     maxPlayers: 6,
     smallBlind: 1,
     bigBlind: 2,
     roundInPlay: false,
-}
+};
 
 const attemptToStartARound = () => {
-    let qualifyedUsers = [];
+    let qualifiedUsers: User[] = [];
 
     table.users.forEach((user) => {
         if (user.bal >= table.bigBlind + table.smallBlind) {
-            qualifyedUsers.push(user);
+            qualifiedUsers.push(user);
         }
-    })
+    });
 
-    if (qualifyedUsers.length >= 2) {
+    if (qualifiedUsers.length >= 2) {
         table.roundInPlay = true;
-        table.round = new Round(qualifyedUsers, table.smallBlind, table.bigBlind, io);
+        table.round = new Round(qualifiedUsers, table.smallBlind, table.bigBlind, io, () => {
+            table.users[table.users.length];
+        });
     }
-}
+};
 
-
-io.on('connection', async (socket) => {
-
-    const token = socket.handshake.auth.token;
+io.on('connection', async (socket: Socket) => {
+    const token: string = socket.handshake.auth.token;
     console.log('User connecting with token:', token);
-
 
     const client = await pool.connect();
 
@@ -63,7 +70,7 @@ io.on('connection', async (socket) => {
                 response.rows[0].username,
                 response.rows[0].cents,
                 response.rows[0].id,
-                socket,
+                socket
             );
 
             table.users.push(newUser);
@@ -71,7 +78,7 @@ io.on('connection', async (socket) => {
             const playerId = response.rows[0].id;
 
             socket.on('fold', () => {
-                const round = table.round;
+                const round = table.round as Round;
                 if (round) {
                     if (round.players[round.actionIndex].databaseId === playerId) {
                         round.fold();
@@ -84,7 +91,7 @@ io.on('connection', async (socket) => {
             });
 
             socket.on('check', () => {
-                const round = table.round;
+                const round = table.round as Round;
                 if (round) {
                     if (round.players[round.actionIndex].databaseId === playerId) {
                         round.check();
@@ -96,8 +103,8 @@ io.on('connection', async (socket) => {
                 }
             });
 
-            socket.on('raise', ({ raiseAmount }) => {
-                const round = table.round;
+            socket.on('raise', ({ raiseAmount }: { raiseAmount: number }) => {
+                const round = table.round as Round;
                 if (round) {
                     if (round.players[round.actionIndex].databaseId === playerId) {
                         round.raise(raiseAmount);
@@ -110,7 +117,7 @@ io.on('connection', async (socket) => {
             });
 
             socket.on('call', () => {
-                const round = table.round;
+                const round = table.round as Round;
                 if (round) {
                     if (round.players[round.actionIndex].databaseId === playerId) {
                         round.call();
@@ -142,9 +149,9 @@ io.on('connection', async (socket) => {
                 const playerIndex = table.round.players.findIndex(player => player.databaseId === playerId);
 
                 if (playerIndex !== -1) {
-                    table.round.players.splice(playerIndex, 1);
+                    (table.round as Round).players.splice(playerIndex, 1);
                     console.log(`Removed player ${playerId} from the round.`);
-                    table.round.nextPlayer();
+                    (table.round as Round).nextPlayer();
                 }
             });
         } else {

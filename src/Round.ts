@@ -1,20 +1,34 @@
+import User from './User'; // Assuming User class exists and is correctly typed
+import { Server } from 'socket.io';
+import evalHand from "./evaluator";
 
 export default class Round {
     pot = 0;
-    players;
+    players: User[] = [];
     currentBet = 0;
     newMoneyIn = 0;
     actionIndex = 0;
     mostRecentHappyIndex = 0;
-    communityCards = [];
-    cardsDealt = [];
-    bigBind;
-    smallBlind;
-    roundEnded = false
-    wss;
-    endOfRoundCallback;
+    communityCards: string[] = [];
+    cardsDealt: string[] = [];
+    bigBlind: number;
+    smallBlind: number;
+    roundEnded = false;
+    wss: Server;
+    endOfRoundCallback: () => void;
+    stage = 0;
 
-    randomCard() {
+    constructor(players: User[], bigBlind: number, smallBlind: number, webSocketServer: Server, callback: () => void) {
+        this.players = players;
+        this.bigBlind = bigBlind;
+        this.smallBlind = smallBlind;
+        this.wss = webSocketServer;
+        this.endOfRoundCallback = callback;
+
+        this.payBlindsDealCardsAndStartRound();
+    }
+
+    randomCard(): string {
         const ranks = ['2', '3', '4', '5', '6', '7', '8', '9', 't', 'j', 'q', 'k', 'a'];
         const suits = ['d', 'c', 'h', 's'];
 
@@ -34,48 +48,47 @@ export default class Round {
         return card;
     }
 
-    stage = 0;
-
-    /*
-    0 - none
-    1 - preFlop
-    2 - postFlop
-    3 - post turn
-    4 - postRiver
-    5 - postRound
-     */
-
-    constructor(players, bigBlind, smallBlind, webSocketServer, callback) {
-        this.players = players;
-        this.bigBind = bigBlind;
-        this.smallBlind = smallBlind;
-        this.wss = webSocketServer;
-        this.endOfRoundCallback = callback;
-
-        this.payBlinds();
-    }
-
-    payBlinds() {
+    payBlindsDealCardsAndStartRound(): void {
         this.players[1].bal -= this.smallBlind;
         this.players[1].syncBal();
+        this.wss.emit('action', { type: 'blind', index: 1, amount: this.smallBlind});
 
         if (this.players[2]) {
             this.players[2].bal -= this.smallBlind;
             this.players[2].syncBal();
-        }else {
+            if (this.players[3]) {
+                this.mostRecentHappyIndex = 3;
+            }else {
+                this.mostRecentHappyIndex = 0;
+            }
+        } else {
             this.players[0].bal -= this.smallBlind;
             this.players[0].syncBal();
+            this.mostRecentHappyIndex = 1;
         }
+
+
+
+        this.nextPlayer(false);
     }
 
-    nextPlayer() {
+    dealAllHands() {
+        this.players.forEach(player => {
+            player.cards.splice(0)
+            player.cards.push(this.randomCard());
+            player.cards.push(this.randomCard());
+        })
+    }
+
+    nextPlayer(careAboutLastHappyIndex: boolean = true): void {
         const prevActionIndex = this.actionIndex;
         let suitablePlayers = 0;
         this.players.forEach((player) => {
             if (!player.allIn && !player.folded) {
                 suitablePlayers++;
             }
-        })
+        });
+
         if (suitablePlayers >= 2) {
             let foundPlayer = false;
             let iterations = 0;
@@ -93,52 +106,44 @@ export default class Round {
             }
 
             if (iterations > 1000) {
-                console.log('could not find suitable player')
+                console.log('Could not find a suitable player');
                 this.endRound();
-            }else {
-                if (this.actionIndex === this.mostRecentHappyIndex) {
+            } else {
+                if (this.actionIndex === this.mostRecentHappyIndex &&careAboutLastHappyIndex) {
                     this.endStage();
                 }
             }
-        }else {
+        } else {
             this.endRound();
         }
     }
 
-    endRound() {
+    endRound(): void {
         this.roundEnded = true;
-        this.solveHandsAndGivePeoplePot()
+        this.solveHandsAndGivePeoplePot();
         this.endOfRoundCallback();
     }
 
-    endStage() {
+    endStage(): void {
         this.currentBet = 0;
         this.mostRecentHappyIndex = 0;
         this.actionIndex = 0;
-        this.pot+=this.newMoneyIn;
+        this.pot += this.newMoneyIn;
         this.stage++;
 
-
-        //functions run at the start of their respective stage
-
+        // Functions run at the start of their respective stage
         if (this.stage === 2) { // post flop
+            this.communityCards.push(this.randomCard(), this.randomCard(), this.randomCard());
+        } else if (this.stage === 3) { // post turn
             this.communityCards.push(this.randomCard());
+        } else if (this.stage === 4) { // post river
             this.communityCards.push(this.randomCard());
-            this.communityCards.push(this.randomCard());
-
-        }else if (this.stage === 3) { // post turn
-            this.communityCards.push(this.randomCard());
-
-
-        }else if (this.stage === 4) {// post river
-            this.communityCards.push(this.randomCard());
-
-        }else if (this.stage === 5) { // post round
+        } else if (this.stage === 5) { // post round
             this.endRound();
         }
     }
 
-    raise(amount) {
+    raise(amount: number): void {
         const player = this.players[this.actionIndex];
         // Calculate the amount needed to match the current bet first
         const callAmount = this.currentBet - player.currentBet;
@@ -163,8 +168,7 @@ export default class Round {
                 player.allIn = true;
             }
 
-            this.wss.emit('action', {type: 'raise', index: this.actionIndex})
-
+            this.wss.emit('action', { type: 'raise', index: this.actionIndex, amount: amount});
             player.syncBal();
             this.nextPlayer();
         } else {
@@ -173,7 +177,7 @@ export default class Round {
         }
     }
 
-    call() {
+    call(): void {
         const player = this.players[this.actionIndex];
         // Calculate the amount needed to match the current bet
         const callAmount = this.currentBet - player.currentBet;
@@ -187,7 +191,7 @@ export default class Round {
                 player.bal -= callAmount;
                 // Update the player's bet to match the table's current bet
                 player.currentBet = this.currentBet;
-                this.wss.emit('action', {type: 'call', index: this.actionIndex, allIn: false})
+                this.wss.emit('action', { type: 'call', index: this.actionIndex, allIn: false });
                 player.syncBal();
                 this.nextPlayer();
             } else {
@@ -200,44 +204,42 @@ export default class Round {
                 // Set balance to zero and mark as all-in
                 player.bal = 0;
                 player.allIn = true;
-                this.wss.emit('action', {type: 'call', index: this.actionIndex, allIn: true})
+                this.wss.emit('action', { type: 'call', index: this.actionIndex, allIn: true });
                 player.syncBal();
                 this.nextPlayer();
             }
         }
     }
 
-    check() {
+    check(): void {
         const player = this.players[this.actionIndex];
         // If the player's current bet already matches or exceeds the table bet, they can check
         if (this.currentBet <= player.currentBet) {
-            this.wss.emit('action', {type: 'check', index: this.actionIndex})
+            this.wss.emit('action', { type: 'check', index: this.actionIndex });
             this.nextPlayer();
         }
     }
 
-    fold() {
+    fold(): void {
         this.players[this.actionIndex].folded = true;
-        this.wss.emit('action', {type: 'fold', index: this.actionIndex})
+        this.wss.emit('action', { type: 'fold', index: this.actionIndex });
         this.nextPlayer();
     }
 
-    solveHandsAndGivePeoplePot/*lol*/() {
-        let scores = [];
+    solveHandsAndGivePeoplePot/*lol*/(): void {
+        let scores: [number, number][] = [];
 
         // Evaluate hand scores for all non-folded players
         this.players.forEach((player, index) => {
             if (!player.folded) {
                 const allCards = player.cards.concat(this.communityCards);
-                const handScore = eval(allCards);
+                const handScore = evalHand(allCards); // Note: replace with actual hand evaluation logic
                 scores.push([handScore, index]);
             }
         });
 
         // Sort scores in descending order (best hand first)
         scores.sort((a, b) => b[0] - a[0]);
-
-        console.log(scores);
 
         let i = 0;
         while (i < scores.length && this.pot > 0) {
@@ -256,15 +258,12 @@ export default class Round {
 
             // Split among tied players
             let share = Math.floor(amountToDistribute / sameScorePlayers.length);
-            let remainder = amountToDistribute % sameScorePlayers.length;
 
-            sameScorePlayers.forEach((score, index) => {
+            sameScorePlayers.forEach((score) => {
                 this.players[score[1]].bal += share;
                 // Give remainder to the first few players to balance it out
-                if (remainder > 0) {
-                    this.players[score[1]].bal += 1;
-                    remainder--;
-                }
+                this.players[score[1]].ws.emit('bal', { bal: this.players[score[1]].bal });
+                this.players[score[1]].syncBal();
             });
 
             // Deduct the distributed amount from the pot
@@ -272,6 +271,4 @@ export default class Round {
             i++;
         }
     }
-
-
 }
