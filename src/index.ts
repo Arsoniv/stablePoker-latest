@@ -3,7 +3,8 @@ import { Pool } from 'pg';
 import dotenv from 'dotenv';
 import User from './User';
 import Round from './Round';
-import { createServer } from 'http';
+import https from 'https';
+import fs from 'fs';
 import express from 'express';
 import {EventEmitter} from 'events'
 
@@ -16,8 +17,17 @@ const pool = new Pool({
 });
 
 const app = express();
-const server = createServer(app); // Create an HTTP server
 
+// Load SSL certificate and private key
+const options = {
+    key: fs.readFileSync("key.pem"),
+    cert: fs.readFileSync("cert.pem")
+};
+
+// Create HTTPS server
+const server = https.createServer(options, app);
+
+// Attach Socket.io to the HTTPS server
 const server1 = new Server(server, {
     cors: {
         origin: "*",
