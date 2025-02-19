@@ -125,36 +125,43 @@ export default class Round {
 
         const prevActionIndex = this.actionIndex;
         let suitablePlayers = 0;
+        let nonAllInPlayers = 0;
+
         this.players.forEach((player) => {
-            if (!player.allIn && !player.folded) {
+            if (!player.folded) {
                 suitablePlayers++;
+                if (!player.allIn) nonAllInPlayers++;
             }
         });
 
-        if (suitablePlayers >= 2) {
-            let foundPlayer = false;
-            let iterations = 0;
-            while (!foundPlayer && iterations <= 1000) {
-                this.actionIndex++;
-                if (this.actionIndex >= this.players.length) { // Wrap based on players length
-                    this.actionIndex = 0;
-                }
-                if (this.players[this.actionIndex] &&
-                    !this.players[this.actionIndex].allIn &&
-                    !this.players[this.actionIndex].folded &&
-                    this.actionIndex !== prevActionIndex) {
-                    foundPlayer = true;
-                }
-                iterations++;
-            }
+        if (suitablePlayers <= 1) {
+            this.endRound();
+            return;
+        }
 
-            if (iterations > 1000) {
-                console.log('Could not find a suitable player');
-                this.endRound();
-                return;
+        if (nonAllInPlayers <= 1) {
+            console.log('Only one non-all-in player remains, fast-forwarding stages.');
+            while (this.stage < 5) {
+                this.endStage();
             }
-        } else {
-            // If there aren't at least 2 active (non-allIn, non-folded) players, end the round.
+            return;
+        }
+
+        let foundPlayer = false;
+        let iterations = 0;
+        while (!foundPlayer && iterations <= 1000) {
+            this.actionIndex++;
+            if (this.actionIndex >= this.players.length) {
+                this.actionIndex = 0;
+            }
+            if (!this.players[this.actionIndex].allIn && !this.players[this.actionIndex].folded && this.actionIndex !== prevActionIndex) {
+                foundPlayer = true;
+            }
+            iterations++;
+        }
+
+        if (iterations > 1000) {
+            console.log('Could not find a suitable player');
             this.endRound();
             return;
         }
@@ -163,14 +170,6 @@ export default class Round {
             this.endStage();
         }
         this.sendInfoToPlayers();
-    }
-
-    runOutHand(): void {
-        console.log("Running out the hand automatically");
-        // Automatically progress through the remaining stages until the round is complete.
-        while (this.stage < 5) {
-            this.endStage();
-        }
     }
 
     endRound(): void {
@@ -199,7 +198,7 @@ export default class Round {
         });
         this.stage++;
 
-        // Execute stage-specific actions
+        // Deal community cards for each stage
         if (this.stage === 2) { // post flop
             this.communityCards.push(this.randomCard(), this.randomCard(), this.randomCard());
         } else if (this.stage === 3) { // post turn
@@ -208,15 +207,16 @@ export default class Round {
             this.communityCards.push(this.randomCard());
         } else if (this.stage === 5) { // post round
             this.endRound();
-            return; // exit early since the round has ended
+            return;
         }
 
-        // Ensure the actionIndex points to an eligible player.
-        // Loop at most the number of players to avoid an infinite loop.
-        let attempts = 0;
-        while ((this.players[this.actionIndex].folded || this.players[this.actionIndex].allIn) && attempts < this.players.length) {
-            this.actionIndex = (this.actionIndex + 1) % this.players.length;
-            attempts++;
+        // If only one non-all-in player remains, fast-forward to showdown
+        let nonAllInPlayers = this.players.filter(player => !player.folded && !player.allIn).length;
+        if (nonAllInPlayers <= 1 && this.stage < 5) {
+            while (this.stage < 5) {
+                this.endStage();
+            }
+            return;
         }
 
         this.sendInfoToPlayers();
