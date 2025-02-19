@@ -1,6 +1,7 @@
 import User from './User'; // Assuming User class exists and is correctly typed
 import { Server } from 'socket.io';
 import evalHand from "./evaluator";
+import {EventEmitter} from "events";
 
 export default class Round {
     pot = 0;
@@ -16,16 +17,52 @@ export default class Round {
     roundEnded = false;
     wss: Server;
     endOfRoundCallback: () => void;
-    stage = 0;
+    stage = 1;
+    eventEmitter: EventEmitter;
 
-    constructor(players: User[], bigBlind: number, smallBlind: number, webSocketServer: Server, callback: () => void) {
+    constructor(players: User[], bigBlind: number, smallBlind: number, webSocketServer: Server, callback: () => void, eventEmitter: EventEmitter) {
         this.players = players;
         this.bigBlind = bigBlind;
         this.smallBlind = smallBlind;
         this.wss = webSocketServer;
         this.endOfRoundCallback = callback;
+        this.eventEmitter = eventEmitter;
+
+        this.wss.emit('roundStart');
+        this.wss.emit('roundInfo', this.getRoundInfo());
 
         this.payBlindsDealCardsAndStartRound();
+    }
+
+    getRoundInfo(): any {
+        let playerArr: any = [];
+        this.players.forEach((player) => {
+            playerArr.push(player.getDataObject());
+        })
+        return {
+            players: playerArr,
+            pot: this.pot,
+            smallBlind: this.smallBlind,
+            bigBlind: this.bigBlind,
+            stage: this.stage,
+            communityCards: this.communityCards,
+            mostRecentHappyIndex: this.mostRecentHappyIndex,
+            actionIndex: this.actionIndex,
+            roundEnded: this.roundEnded,
+            newMoneyIn: this.newMoneyIn,
+            currentBet: this.currentBet
+        }
+    }
+
+    sendInfoToPlayers() {
+        this.eventEmitter.emit('sendTableData');
+        this.players.forEach(player => {
+            player.ws.emit('roundInfo', this.getRoundInfo());
+        })
+        this.players.forEach(player => {
+            console.log(player.bal);
+            player.ws.emit('bal', {bal: player.bal});
+        })
     }
 
     randomCard(): string {
@@ -49,25 +86,27 @@ export default class Round {
     }
 
     payBlindsDealCardsAndStartRound(): void {
-        this.players[1].bal -= this.smallBlind;
-        this.players[1].syncBal();
-        this.wss.emit('action', { type: 'blind', index: 1, amount: this.smallBlind});
+        this.players[0].bal -= this.smallBlind;
+        this.newMoneyIn += this.smallBlind;
+        this.players[0].currentBet += this.smallBlind;
+        this.players[0].currentPotStake += this.smallBlind;
+        this.players[0].syncBal();
 
+        this.players[1].bal -= this.bigBlind;
+        this.currentBet = this.bigBlind;
+        this.newMoneyIn += this.bigBlind;
+        this.players[1].currentBet += this.bigBlind;
+        this.players[1].currentPotStake += this.bigBlind;
+        this.players[1].syncBal();
         if (this.players[2]) {
-            this.players[2].bal -= this.smallBlind;
-            this.players[2].syncBal();
-            if (this.players[3]) {
-                this.mostRecentHappyIndex = 3;
-            }else {
-                this.mostRecentHappyIndex = 0;
-            }
-        } else {
-            this.players[0].bal -= this.smallBlind;
-            this.players[0].syncBal();
-            this.mostRecentHappyIndex = 1;
+            this.mostRecentHappyIndex = 2;
+        }else {
+            this.mostRecentHappyIndex = 0;
         }
 
+        this.actionIndex = 1;
 
+        this.dealAllHands();
 
         this.nextPlayer(false);
     }
@@ -77,10 +116,13 @@ export default class Round {
             player.cards.splice(0)
             player.cards.push(this.randomCard());
             player.cards.push(this.randomCard());
+            player.ws.emit('holeCards', player.cards);
         })
     }
 
     nextPlayer(careAboutLastHappyIndex: boolean = true): void {
+        console.log('nextPlayer');
+
         const prevActionIndex = this.actionIndex;
         let suitablePlayers = 0;
         this.players.forEach((player) => {
@@ -94,13 +136,14 @@ export default class Round {
             let iterations = 0;
             while (!foundPlayer && iterations <= 1000) {
                 this.actionIndex++;
-                if (this.actionIndex > 10) {
+                if (this.actionIndex >= this.players.length) { // Wrap based on players length
                     this.actionIndex = 0;
                 }
-                if (this.players[this.actionIndex]) {
-                    if (!this.players[this.actionIndex].allIn && !this.players[this.actionIndex].folded && this.actionIndex !== prevActionIndex) {
-                        foundPlayer = true;
-                    }
+                if (this.players[this.actionIndex] &&
+                    !this.players[this.actionIndex].allIn &&
+                    !this.players[this.actionIndex].folded &&
+                    this.actionIndex !== prevActionIndex) {
+                    foundPlayer = true;
                 }
                 iterations++;
             }
@@ -108,30 +151,55 @@ export default class Round {
             if (iterations > 1000) {
                 console.log('Could not find a suitable player');
                 this.endRound();
-            } else {
-                if (this.actionIndex === this.mostRecentHappyIndex &&careAboutLastHappyIndex) {
-                    this.endStage();
-                }
+                return;
             }
         } else {
+            // If there aren't at least 2 active (non-allIn, non-folded) players, end the round.
             this.endRound();
+            return;
+        }
+
+        if (this.actionIndex === this.mostRecentHappyIndex && careAboutLastHappyIndex) {
+            this.endStage();
+        }
+        this.sendInfoToPlayers();
+    }
+
+    runOutHand(): void {
+        console.log("Running out the hand automatically");
+        // Automatically progress through the remaining stages until the round is complete.
+        while (this.stage < 5) {
+            this.endStage();
         }
     }
 
     endRound(): void {
+        console.log(`end round`)
+
         this.roundEnded = true;
-        this.solveHandsAndGivePeoplePot();
+        const winners: any[] = this.solveHandsAndGivePeoplePot();
+
+        this.wss.emit('roundEnd', {
+            winners: winners
+        });
+
         this.endOfRoundCallback();
     }
 
     endStage(): void {
+        console.log('nextStage');
         this.currentBet = 0;
         this.mostRecentHappyIndex = 0;
         this.actionIndex = 0;
+
         this.pot += this.newMoneyIn;
+        this.newMoneyIn = 0;
+        this.players.forEach(player => {
+            player.currentBet = 0;
+        });
         this.stage++;
 
-        // Functions run at the start of their respective stage
+        // Execute stage-specific actions
         if (this.stage === 2) { // post flop
             this.communityCards.push(this.randomCard(), this.randomCard(), this.randomCard());
         } else if (this.stage === 3) { // post turn
@@ -140,70 +208,79 @@ export default class Round {
             this.communityCards.push(this.randomCard());
         } else if (this.stage === 5) { // post round
             this.endRound();
+            return; // exit early since the round has ended
         }
+
+        // Ensure the actionIndex points to an eligible player.
+        // Loop at most the number of players to avoid an infinite loop.
+        let attempts = 0;
+        while ((this.players[this.actionIndex].folded || this.players[this.actionIndex].allIn) && attempts < this.players.length) {
+            this.actionIndex = (this.actionIndex + 1) % this.players.length;
+            attempts++;
+        }
+
+        this.sendInfoToPlayers();
     }
 
     raise(amount: number): void {
         const player = this.players[this.actionIndex];
+
         // Calculate the amount needed to match the current bet first
         const callAmount = this.currentBet - player.currentBet;
-        // Total amount the player must put in to raise
         const totalRequired = callAmount + amount;
 
         if (player.bal >= totalRequired) {
             this.mostRecentHappyIndex = this.actionIndex;
+
             // Increase the table's current bet by the raise amount
             this.currentBet += amount;
 
-            // Update how much the player is putting in this round
-            const putIn = this.currentBet - player.currentBet;
+            // The total amount the player is putting in
+            const putIn = callAmount + amount;
             this.newMoneyIn += putIn;
             player.currentPotStake += putIn;
+            player.currentBet += amount;
 
-            // Deduct from the player's balance and update their current bet
+            // Deduct from the player's balance
             player.bal -= putIn;
-            player.currentBet = this.currentBet;
 
             if (player.bal === 0) {
                 player.allIn = true;
             }
 
-            this.wss.emit('action', { type: 'raise', index: this.actionIndex, amount: amount});
+            this.wss.emit('action', { type: 'raise', index: this.actionIndex, amount: amount });
             player.syncBal();
             this.nextPlayer();
         } else {
-            // If the player cannot afford a raise, fall back to calling
+            // If the player cannot afford a raise, they automatically call
             this.call();
         }
     }
 
     call(): void {
         const player = this.players[this.actionIndex];
-        // Calculate the amount needed to match the current bet
         const callAmount = this.currentBet - player.currentBet;
 
-        // If there's nothing to call, just check
         if (callAmount <= 0) {
             this.check();
         } else {
             if (player.bal >= callAmount) {
                 this.newMoneyIn += callAmount;
                 player.bal -= callAmount;
-                // Update the player's bet to match the table's current bet
                 player.currentBet = this.currentBet;
+                player.currentPotStake += callAmount;
+
                 this.wss.emit('action', { type: 'call', index: this.actionIndex, allIn: false });
                 player.syncBal();
                 this.nextPlayer();
             } else {
-                // The player doesn't have enough chips to fully call
-                // They put in whatever chips they have, marking them all-in.
+                // Player goes all-in with the remaining balance
                 this.newMoneyIn += player.bal;
-                // Update the player's current bet with the remaining balance they can commit
+                player.currentPotStake += player.bal; // Ensure stake is updated BEFORE balance goes to zero
                 player.currentBet += player.bal;
-                player.currentPotStake += player.currentBet;
-                // Set balance to zero and mark as all-in
                 player.bal = 0;
                 player.allIn = true;
+
                 this.wss.emit('action', { type: 'call', index: this.actionIndex, allIn: true });
                 player.syncBal();
                 this.nextPlayer();
@@ -226,49 +303,61 @@ export default class Round {
         this.nextPlayer();
     }
 
-    solveHandsAndGivePeoplePot/*lol*/(): void {
-        let scores: [number, number][] = [];
+    solveHandsAndGivePeoplePot(): {     username: string;     bal: number;     databaseId: string;     allIn: boolean;     folded: boolean;     currentBet: number;     cards: string[]; }[] {
+        const winnersArray: {     username: string;     bal: number;     databaseId: string;     allIn: boolean;     folded: boolean;     currentBet: number;     cards: string[]; }[] = [];
+        let remainingPot = this.pot;
+        // Filter out players who folded.
+        const activePlayers = this.players.filter(player => !player.folded);
 
-        // Evaluate hand scores for all non-folded players
-        this.players.forEach((player, index) => {
-            if (!player.folded) {
-                const allCards = player.cards.concat(this.communityCards);
-                const handScore = evalHand(allCards); // Note: replace with actual hand evaluation logic
-                scores.push([handScore, index]);
-            }
-        });
+        // Create a Map to track each active player's remaining contribution.
+        const remainingStakes = new Map<User, number>();
+        activePlayers.forEach(player => remainingStakes.set(player, player.currentPotStake));
 
-        // Sort scores in descending order (best hand first)
-        scores.sort((a, b) => b[0] - a[0]);
+        // Continue until no active player has any stake left.
+        while (true) {
+            // Get the list of players who still have a positive stake.
+            const playersWithStake = activePlayers.filter(player => (remainingStakes.get(player) || 0) > 0);
+            if (playersWithStake.length === 0) break;
 
-        let i = 0;
-        while (i < scores.length && this.pot > 0) {
-            let sameScorePlayers = [scores[i]];
+            // Find the minimum remaining stake among these players.
+            const minStake = Math.min(...playersWithStake.map(player => remainingStakes.get(player)!));
 
-            // Collect all players with the same score (for ties)
-            while (i + 1 < scores.length && scores[i][0] === scores[i + 1][0]) {
-                sameScorePlayers.push(scores[i + 1]);
-                i++;
-            }
+            // Calculate the side pot for this level.
+            const sidePot = minStake * playersWithStake.length;
 
-            // Find the **minimum stake** among tied players (this determines the max they can win)
-            const minStake = Math.min(...sameScorePlayers.map(score => this.players[score[1]].currentPotStake));
-            const maxPayAmount = minStake * sameScorePlayers.length;
-            let amountToDistribute = Math.min(this.pot, maxPayAmount);
-
-            // Split among tied players
-            let share = Math.floor(amountToDistribute / sameScorePlayers.length);
-
-            sameScorePlayers.forEach((score) => {
-                this.players[score[1]].bal += share;
-                // Give remainder to the first few players to balance it out
-                this.players[score[1]].ws.emit('bal', { bal: this.players[score[1]].bal });
-                this.players[score[1]].syncBal();
+            // Determine eligible players for this pot (those who contributed in this round).
+            // Here we recalc each player's hand score.
+            let bestScore = -Infinity;
+            let levelWinners: User[] = [];
+            playersWithStake.forEach(player => {
+                const score = evalHand(player.cards.concat(this.communityCards));
+                if (score > bestScore) {
+                    bestScore = score;
+                    levelWinners = [player];
+                } else if (score === bestScore) {
+                    levelWinners.push(player);
+                }
             });
 
-            // Deduct the distributed amount from the pot
-            this.pot -= amountToDistribute;
-            i++;
+            // Split the side pot evenly among winners.
+            const share = Math.floor(sidePot / levelWinners.length);
+            levelWinners.forEach(player => {
+                player.bal += share;
+                player.winnings += share;
+                player.ws.emit('bal', { bal: player.bal });
+                player.syncBal();
+                winnersArray.push(player.getDataObjectWithCards());
+            });
+
+            remainingPot -= sidePot;
+
+            // Subtract the minStake from each player's remaining stake.
+            playersWithStake.forEach(player => {
+                const updatedStake = (remainingStakes.get(player) || 0) - minStake;
+                remainingStakes.set(player, updatedStake);
+            });
         }
+
+        return winnersArray;
     }
 }

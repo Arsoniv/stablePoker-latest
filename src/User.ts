@@ -20,6 +20,7 @@ export default class User {
     currentPotStake: number = 0;
     cards: string[] = [];
     ws: Socket;
+    winnings: number = 0;
 
     constructor(username: string, bal: number, databaseId: string, webSocket: Socket) {
         this.username = username;
@@ -41,6 +42,29 @@ export default class User {
         } finally {
             // Release the client back to the pool
             client.release();
+        }
+    }
+
+    getDataObject() {
+        return {
+            username: this.username,
+            bal: this.bal,
+            databaseId: this.databaseId,
+            allIn: this.allIn,
+            folded: this.folded,
+            currentBet: this.currentBet,
+        }
+    }
+
+    getDataObjectWithCards() {
+        return {
+            username: this.username,
+            bal: this.bal,
+            databaseId: this.databaseId,
+            allIn: this.allIn,
+            folded: this.folded,
+            currentBet: this.currentBet,
+            cards: this.cards
         }
     }
 }
