@@ -141,9 +141,7 @@ export default class Round {
 
         if (nonAllInPlayers <= 1) {
             console.log('Only one non-all-in player remains, fast-forwarding stages.');
-            while (this.stage < 5) {
-                this.endStage();
-            }
+            this.endStage();
             return;
         }
 
@@ -198,7 +196,7 @@ export default class Round {
         });
         this.stage++;
 
-        // Deal community cards for each stage
+        // Execute stage-specific actions
         if (this.stage === 2) { // post flop
             this.communityCards.push(this.randomCard(), this.randomCard(), this.randomCard());
         } else if (this.stage === 3) { // post turn
@@ -207,17 +205,11 @@ export default class Round {
             this.communityCards.push(this.randomCard());
         } else if (this.stage === 5) { // post round
             this.endRound();
-            return;
+            return; // exit early since the round has ended
         }
 
-        // If only one non-all-in player remains, fast-forward to showdown
-        let nonAllInPlayers = this.players.filter(player => !player.folded && !player.allIn).length;
-        if (nonAllInPlayers <= 1 && this.stage < 5) {
-            while (this.stage < 5) {
-                this.endStage();
-            }
-            return;
-        }
+        this.actionIndex++;
+        this.nextPlayer(false);
 
         this.sendInfoToPlayers();
     }
