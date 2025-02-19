@@ -20,7 +20,7 @@ const server = createServer(app); // Create an HTTP server
 
 const server1 = new Server(server, {
     cors: {
-        origin: "http://localhost:5173",
+        origin: "*",
         methods: ["GET", "POST"]
     }
 });
