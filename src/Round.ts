@@ -228,10 +228,10 @@ export default class Round {
             this.currentBet += amount;
 
             // The total amount the player is putting in
-            const putIn = callAmount + amount;
+            const putIn = (callAmount + amount);
             this.newMoneyIn += putIn;
             player.currentPotStake += putIn;
-            player.currentBet += amount;
+            player.currentBet += putIn;
 
             // Deduct from the player's balance
             player.bal -= putIn;
