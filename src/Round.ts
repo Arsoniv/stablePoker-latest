@@ -108,7 +108,7 @@ export default class Round {
         this.actionIndex = 1;
 
         this.dealAllHands();
-
+        this.sendInfoToPlayers();
         this.nextPlayer(false);
     }
 
@@ -122,6 +122,7 @@ export default class Round {
     }
 
     nextPlayer(careAboutLastHappyIndex: boolean = true): void {
+        this.sendInfoToPlayers();
         console.log('nextPlayer');
 
         const prevActionIndex = this.actionIndex;
