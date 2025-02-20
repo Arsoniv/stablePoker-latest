@@ -94,6 +94,9 @@ const attemptToStartARound = () => {
             table.round = null;
             table.roundInPlay = false;
             table.users.push(table.users.shift()!);
+            table.users.forEach((user, index) => {
+                user.ws.emit('username', { username: user.username, id: index });
+            })
             server1.emit('tableUserInfo', getAllUserData());
             server1.emit('timeToNextRound', 5000);
             setTimeout(attemptToStartARound, 5000);
