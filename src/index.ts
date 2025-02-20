@@ -82,6 +82,15 @@ const attemptToStartARound = () => {
         table.roundInPlay = true;
         table.round = new Round(qualifiedUsers, table.bigBlind, table.smallBlind, server1, () => {
             console.log('end round callback')
+            table.round?.eventEmitter.removeAllListeners();
+            table.users?.forEach((user) => {
+                user.allIn = false;
+                user.currentBet = 0;
+                user.folded = false;
+                user.currentPotStake = 0;
+                user.cards = [];
+                user.winnings = 0;
+            })
             table.round = null;
             table.roundInPlay = false;
             table.users.push(table.users.shift()!);
