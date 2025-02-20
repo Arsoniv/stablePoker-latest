@@ -28,6 +28,7 @@ export default class Round {
         this.endOfRoundCallback = callback;
         this.eventEmitter = eventEmitter;
 
+        this.sendInfoToPlayers()
         this.wss.emit('roundStart');
         this.wss.emit('roundInfo', this.getRoundInfo());
 
