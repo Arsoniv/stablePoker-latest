@@ -341,6 +341,10 @@ export default class Round {
                 player.ws.emit('bal', { bal: player.bal });
                 player.syncBal();
                 winnersArray.push(player.getDataObjectWithCards());
+                this.wss.send('winnerHoleCards', {
+                    cards: player.cards,
+                    dataBaseID: player.databaseId,
+                })
             });
 
             remainingPot -= sidePot;
